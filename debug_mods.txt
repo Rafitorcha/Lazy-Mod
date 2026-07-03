@@ -1,0 +1,8 @@
+=== LOG DE DEPURACIÓN DE MODS ===
+
+📦 Archivo ZIP seleccionado: 2079680124_Met.zip
+   ↳ ID limpia obtenida con split: '2079680124'
+   ↳ Ruta de destino calculada: /home/rafael/.local/share/Steam/steamapps/compatdata/3580745457/pfx/drive_c/users/steamuser/Local Settings/Application Data/RivalsofAether/workshop/2079680124
+   ⚡ Extrayendo contenido dentro de: 2079680124/
+   ✅ ¡Proceso completado con éxito!
+

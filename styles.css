@@ -1,0 +1,109 @@
+/* ===== ESTILOS GLOBALES ===== */
+Screen {
+    background: #1b1b1b;
+}
+
+#banner {
+    color: #fabd2f;
+    text-style: bold;
+    margin: 10 0 0 4;
+    height: auto;
+}
+
+#instructions {
+    margin: 0 2 1 2;
+    color: #a89984;
+    background: #282828;
+    padding: 0 1;
+}
+
+#list-container {
+    border: heavy #fe8019;
+    margin: 0 2 1 2;
+    padding: 1;
+    height: 65%;
+}
+
+ListView {
+    background: #1b1b1b;
+}
+
+/* ===== ESTILOS DE LISTA ===== */
+ListItem {
+    padding: 0 1;
+    color: #a89984;
+}
+
+/* Hover */
+ListView > ListItem:hover {
+    background: #3c3836;
+    color: #ebdbb2;
+}
+
+/* Focus/Selection */
+ListView:focus > ListItem:focus {
+    background: #504945;
+    color: #fabd2f;
+    text-style: bold;
+}
+
+/* Selected items */
+ListItem.selected {
+    color: #fe8019 !important;
+}
+
+/* Status indicators */
+ListItem .status-selected {
+    color: #fe8019;
+}
+
+ListItem .status-unselected {
+    color: #a89984;
+}
+
+/* ===== MODAL ===== */
+#input-modal {
+    background: #282828;
+    border: heavy #fabd2f;
+    padding: 2;
+    margin: 10;
+    width: 80%;
+    height: auto;
+}
+
+#input-modal Label {
+    color: #a89984;
+    margin-bottom: 1;
+}
+
+#input-modal Input {
+    background: #1b1b1b;
+    color: #ebdbb2;
+    border: solid #fe8019;
+}
+
+#input-modal Input:focus {
+    border: solid #fabd2f;
+}
+
+/* ===== NOTIFICACIONES ===== */
+.notification {
+    background: #282828;
+    color: #ebdbb2;
+    border: solid #fe8019;
+}
+
+.notification--warning {
+    border: solid #fabd2f;
+    color: #fabd2f;
+}
+
+.notification--error {
+    border: solid #fb4934;
+    color: #fb4934;
+}
+
+.notification--success {
+    border: solid #8ec07c;
+    color: #8ec07c;
+}
