@@ -7,7 +7,7 @@ from datetime import datetime
 from textual.app import App, ComposeResult
 from textual.screen import Screen
 from textual.widgets import Header, Footer, ListView, ListItem, Label, Input
-from textual.containers import Vertical, Center, Container  # 👈 Container AQUÍ
+from textual.containers import Vertical, Center, Container
 from textual.binding import Binding
 
 
@@ -62,11 +62,9 @@ class ModalScreen(Screen):
         )
     
     def on_mount(self) -> None:
-        """Enfocar el input al montar"""
         self.query_one("#modal-input").focus()
     
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Enter acepta"""
         if event.input.id == "modal-input":
             value = event.input.value.strip()
             if value:
@@ -74,7 +72,6 @@ class ModalScreen(Screen):
             self.dismiss()
     
     def on_key(self, event) -> None:
-        """Escape cancela"""
         if event.key == "escape":
             self.dismiss()
 
@@ -90,6 +87,7 @@ class LazyModManager(App):
         Binding("enter", "trigger_extraction", "Instalar", show=True),
         Binding("s", "set_source_dir", "Ruta Origen", show=True),
         Binding("t", "set_target_dir", "Ruta Destino", show=True),
+        Binding("h", "show_history_modal", "Historial", show=True),
         Binding("r", "reset_paths", "Resetear", show=True),
         Binding("R", "refresh", "Refrescar", show=True),
         Binding("q", "quit", "Salir", show=True),
@@ -140,7 +138,6 @@ class LazyModManager(App):
         color: #fe8019 !important;
     }
     
-    /* ===== MODAL SCREEN ===== */
     #modal-container {
         width: 100%;
         height: 100%;
@@ -186,22 +183,20 @@ class LazyModManager(App):
 
     def __init__(self):
         super().__init__()
-        # Configuración persistente
         self.config_file = Path.home() / ".config" / "lazy-mod-manager" / "config.json"
         self.config_file.parent.mkdir(parents=True, exist_ok=True)
         
-        # Variables de estado
         self.delete_mode = False
         self.file_list = None
         self.instrucciones_label = None
-        self._modal_callback = None
-        self._is_ready = False
         
-        # Cargar configuración
+        # Historial
+        self.path_history = []
+        self.max_history = 20
+        
         self.load_config()
 
     def load_config(self):
-        """Carga configuración si existe"""
         if self.config_file.exists():
             try:
                 with open(self.config_file, 'r') as f:
@@ -213,26 +208,44 @@ class LazyModManager(App):
                         MODS_DIR = Path(config["mods_dir"])
                     if "delete_mode" in config:
                         self.delete_mode = config["delete_mode"]
-            except:
-                pass
+                    if "path_history" in config:
+                        self.path_history = config["path_history"]
+            except Exception as e:
+                print(f"[DEBUG] Error loading config: {e}")
 
     def save_config(self):
-        """Guarda configuración"""
         try:
             config = {
                 "downloads_dir": str(DOWNLOADS_DIR),
                 "mods_dir": str(MODS_DIR),
-                "delete_mode": self.delete_mode
+                "delete_mode": self.delete_mode,
+                "path_history": self.path_history[-10:]
             }
             with open(self.config_file, 'w') as f:
                 json.dump(config, f, indent=2)
-        except:
-            pass
+        except Exception as e:
+            print(f"[DEBUG] Error saving config: {e}")
+
+    def _add_to_history(self, path: Path, path_type: str = "source") -> None:
+        """Añade una ruta al historial"""
+        path_str = str(path)
+        
+        for i, item in enumerate(self.path_history):
+            if item.get("path") == path_str:
+                self.path_history.pop(i)
+                break
+        
+        self.path_history.append({"path": path_str, "type": path_type})
+        
+        if len(self.path_history) > self.max_history:
+            self.path_history.pop(0)
+        
+        self.save_config()
+        print(f"[DEBUG] Historial: {self.path_history}")
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         
-        # Banner
         delete_status = "[+] DELETE ON" if self.delete_mode else "[-] DELETE OFF"
         yield Label(
             "█████                                          ██████   ██████              █████\n"
@@ -251,14 +264,12 @@ class LazyModManager(App):
             id="banner"
         )
         
-        # Instrucciones
         self.instrucciones_label = Label(
             self._build_instructions_text(),
             id="instrucciones"
         )
         yield self.instrucciones_label
         
-        # Lista
         self.file_list = ListView()
         yield Vertical(self.file_list, id="list-container")
         
@@ -268,7 +279,8 @@ class LazyModManager(App):
         estado = "[+] DELETE YES" if self.delete_mode else "[-] DELETE NO"
         return (
             f"[>] ↑/↓ Navigate  •  Space Mark  •  D {estado}  •  "
-            f"Enter Install  •  S Source  •  T Target  •  R Refresh  •  Q Quit"
+            f"Enter Install  •  S Source  •  T Target  •  "
+            f"h History  •  R Refresh  •  Q Quit"
         )
 
     def _update_instructions(self) -> None:
@@ -276,15 +288,19 @@ class LazyModManager(App):
             self.instrucciones_label.update(self._build_instructions_text())
 
     def on_mount(self) -> None:
-        self._is_ready = True
         self.refresh_list()
+        
+        # Agregar rutas iniciales al historial
+        if not self.path_history:
+            self._add_to_history(DOWNLOADS_DIR, "source")
+            self._add_to_history(MODS_DIR, "destination")
+        
         if self.delete_mode:
             self.notify("[+] Delete Mode: ENABLED (from last session)", severity="warning")
         else:
             self.notify("[*] Delete Mode: DISABLED (from last session)")
 
     def refresh_list(self) -> None:
-        """Refresca la lista de archivos"""
         if self.file_list is None:
             return
         
@@ -306,7 +322,16 @@ class LazyModManager(App):
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         self.process_extraction()
 
-    # ===== ACCIONES =====
+    # ===== ACCIONES DE NAVEGACIÓN =====
+    
+    def action_navigate_up(self) -> None:
+        if self.file_list and self.file_list.index is not None and self.file_list.index > 0:
+            self.file_list.index -= 1
+
+    def action_navigate_down(self) -> None:
+        if self.file_list and self.file_list.index is not None and self.file_list.index < len(self.file_list.children) - 1:
+            self.file_list.index += 1
+    # ===== ACCIONES PRINCIPALES =====
 
     def action_toggle_file(self) -> None:
         if not self.file_list:
@@ -332,7 +357,6 @@ class LazyModManager(App):
         self._update_banner()
 
     def _update_banner(self):
-        """Actualiza el banner con el estado actual"""
         delete_status = "[+] DELETE ON" if self.delete_mode else "[-] DELETE OFF"
         banner = self.query_one("#banner")
         if banner:
@@ -353,12 +377,12 @@ class LazyModManager(App):
             )
 
     def action_set_source_dir(self) -> None:
-        """Cambia la ruta de origen - Como pantalla separada"""
         def callback(value: str) -> None:
             global DOWNLOADS_DIR
             new_path = Path(value.strip())
             if new_path.exists():
                 DOWNLOADS_DIR = new_path
+                self._add_to_history(DOWNLOADS_DIR, "source")
                 self.save_config()
                 self.notify(f"[+] Source updated: {DOWNLOADS_DIR}")
                 self.refresh_list()
@@ -375,13 +399,16 @@ class LazyModManager(App):
         self.push_screen(modal)
 
     def action_set_target_dir(self) -> None:
-        """Cambia la ruta de destino - Como pantalla separada"""
         def callback(value: str) -> None:
             global MODS_DIR
             new_path = Path(value.strip())
-            MODS_DIR = new_path
-            self.save_config()
-            self.notify(f"[+] Target updated: {MODS_DIR}")
+            if new_path.exists():
+                MODS_DIR = new_path
+                self._add_to_history(MODS_DIR, "destination")
+                self.save_config()
+                self.notify(f"[+] Target updated: {MODS_DIR}")
+            else:
+                self.notify("[-] Directory does not exist", severity="error")
         
         modal = ModalScreen(
             "Change Target Directory",
@@ -395,6 +422,8 @@ class LazyModManager(App):
         global DOWNLOADS_DIR, MODS_DIR
         DOWNLOADS_DIR = Path.home() / "Downloads"
         MODS_DIR = Path.home() / ".local/share/Steam/steamapps/compatdata/3580745457/pfx/drive_c/users/steamuser/Local Settings/Application Data/RivalsofAether/workshop"
+        self._add_to_history(DOWNLOADS_DIR, "source")
+        self._add_to_history(MODS_DIR, "destination")
         self.save_config()
         self.notify("[*] Paths reset to defaults")
         self.refresh_list()
@@ -404,14 +433,117 @@ class LazyModManager(App):
         self.refresh_list()
         self.notify("[*] List refreshed")
 
+    # ===== HISTORIAL CON SELECCIÓN =====
+    
+    def action_show_history_modal(self) -> None:
+        """Muestra el historial con opción de seleccionar"""
+        if not self.path_history:
+            self.notify("[*] No hay historial de directorios aún", severity="warning")
+            return
+        
+        # Construir el mensaje con las rutas numeradas
+        msg = "Historial de directorios:\n\n"
+        for i, entry in enumerate(self.path_history, 1):
+            path = entry["path"]
+            path_type = entry.get("type", "source")
+            type_label = "📁 Origen" if path_type == "source" else "📂 Destino"
+            
+            # Marcar si es la ruta actual
+            is_current = path == str(DOWNLOADS_DIR) or path == str(MODS_DIR)
+            marker = "→ " if is_current else "  "
+            msg += f"{marker}{i}. {type_label}: {path}\n"
+        
+        msg += "\nEscribe el número de la ruta y presiona Enter"
+        msg += "\n[S] Origen  •  [T] Destino (ej: '3s' o '5t')"
+        
+        # Mostrar modal con el historial
+        self._show_history_selection_modal(msg)
+
+    def _show_history_selection_modal(self, msg: str) -> None:
+        """Muestra un modal para seleccionar del historial"""
+        
+        def callback(value: str) -> None:
+            value = value.strip().lower()
+            
+            # Determinar si tiene S o T al final
+            apply_type = None
+            number_str = value
+            
+            if value.endswith('s'):
+                apply_type = "source"
+                number_str = value[:-1]
+            elif value.endswith('t'):
+                apply_type = "destination"
+                number_str = value[:-1]
+            
+            # Si no tiene S/T, preguntar
+            if apply_type is None:
+                self.notify("[*] Especifica 's' para Origen o 't' para Destino", severity="warning")
+                self.notify("[*] Ejemplo: '3s' o '5t'", severity="warning")
+                return
+            
+            # Obtener el número
+            try:
+                index = int(number_str) - 1
+            except ValueError:
+                self.notify("[-] Debes escribir un número", severity="error")
+                return
+            
+            # Validar índice
+            if 0 <= index < len(self.path_history):
+                self._apply_history_selection(index, apply_type)
+            else:
+                self.notify(f"[-] Número inválido. Hay {len(self.path_history)} rutas", severity="error")
+        
+        # Mostrar el modal
+        modal = ModalScreen(
+            "History Selection",
+            msg,
+            "Ej: 3s (origen) o 5t (destino)",
+            callback
+        )
+        self.push_screen(modal)
+
+    def _apply_history_selection(self, index: int, apply_type: str) -> None:
+        """Aplica la selección del historial"""
+        if 0 <= index < len(self.path_history):
+            entry = self.path_history[index]
+            selected_path = Path(entry["path"])
+            
+            if not selected_path.exists():
+                self.notify(f"[-] La ruta ya no existe: {selected_path}", severity="error")
+                self.path_history.pop(index)
+                self.save_config()
+                return
+            
+            if apply_type == "source":
+                global DOWNLOADS_DIR
+                DOWNLOADS_DIR = selected_path
+                self._add_to_history(DOWNLOADS_DIR, "source")
+                self.save_config()
+                self.notify(f"[+] Origen cargado del historial: {DOWNLOADS_DIR}")
+                self.refresh_list()
+                self._update_banner()
+            else:
+                global MODS_DIR
+                MODS_DIR = selected_path
+                self._add_to_history(MODS_DIR, "destination")
+                self.save_config()
+                self.notify(f"[+] Destino cargado del historial: {MODS_DIR}")
+
+    # ===== EXTRACCIÓN =====
+    
     def process_extraction(self) -> None:
-        """Procesa la extracción de los mods seleccionados"""
         if not self.file_list:
             return
             
+        if not MODS_DIR.exists():
+            self.notify(f"[-] Target directory does not exist: {MODS_DIR}", severity="error")
+            self.notify("[*] Create it first or check your path", severity="warning")
+            return
+        
         extracted_count = 0
         deleted_count = 0
-        MODS_DIR.mkdir(parents=True, exist_ok=True)
 
         for item in self.file_list.children:
             if isinstance(item, FileItem) and item.selected_for_extraction:
@@ -447,7 +579,7 @@ class LazyModManager(App):
                         deleted_count += 1
 
                 except Exception as e:
-                    self.notify(f"[-] Error: {e}", severity="error")
+                    self.notify(f"[-] Error with {item.file_path.name}: {e}", severity="error")
 
         if extracted_count > 0:
             if self.delete_mode:
