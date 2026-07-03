@@ -5,8 +5,9 @@ import json
 from pathlib import Path
 from datetime import datetime
 from textual.app import App, ComposeResult
+from textual.screen import Screen
 from textual.widgets import Header, Footer, ListView, ListItem, Label, Input
-from textual.containers import Vertical, Center
+from textual.containers import Vertical, Center, Container  # 👈 Container AQUÍ
 from textual.binding import Binding
 
 
@@ -36,12 +37,54 @@ class FileItem(ListItem):
             self.remove_class("selected")
 
 
+class ModalScreen(Screen):
+    """Pantalla de modal para entrada de texto"""
+    
+    def __init__(self, title: str, prompt: str, placeholder: str, callback):
+        super().__init__()
+        self.title_text = title
+        self.prompt_text = prompt
+        self.placeholder = placeholder
+        self.callback = callback
+    
+    def compose(self) -> ComposeResult:
+        yield Container(
+            Center(
+                Vertical(
+                    Label(self.title_text, classes="modal-title"),
+                    Label(self.prompt_text, classes="modal-prompt"),
+                    Input(placeholder=self.placeholder, id="modal-input"),
+                    Label("Enter: Accept  •  Escape: Cancel", classes="modal-hint"),
+                    classes="modal-box"
+                )
+            ),
+            id="modal-container"
+        )
+    
+    def on_mount(self) -> None:
+        """Enfocar el input al montar"""
+        self.query_one("#modal-input").focus()
+    
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Enter acepta"""
+        if event.input.id == "modal-input":
+            value = event.input.value.strip()
+            if value:
+                self.callback(value)
+            self.dismiss()
+    
+    def on_key(self, event) -> None:
+        """Escape cancela"""
+        if event.key == "escape":
+            self.dismiss()
+
+
 class LazyModManager(App):
     """Aplicacion TUI fluida controlada 100% por teclado."""
     
     BINDINGS = [
-        Binding("up,k", "navigate_up", "Arriba", show=True),
-        Binding("down,j", "navigate_down", "Abajo", show=True),
+        Binding("up,↑", "navigate_up", "Arriba", show=True),
+        Binding("down,↓", "navigate_down", "Abajo", show=True),
         Binding("space", "toggle_file", "Marcar Mod", show=True),
         Binding("d", "toggle_delete_mode", "Modo Borrar", show=True),
         Binding("enter", "trigger_extraction", "Instalar", show=True),
@@ -59,7 +102,7 @@ class LazyModManager(App):
     #banner {
         color: #fabd2f;
         text-style: bold;
-        margin: 10 0 0 4;
+        margin: 1 0 0 4;
         height: auto;
     }
     #instrucciones {
@@ -97,15 +140,14 @@ class LazyModManager(App):
         color: #fe8019 !important;
     }
     
-    /* ===== MODAL OVERLAY - Cubre toda la pantalla ===== */
-    #modal-overlay {
-        background: rgba(0, 0, 0, 0.85);  /* Fondo semitransparente oscuro */
-        align: center middle;
+    /* ===== MODAL SCREEN ===== */
+    #modal-container {
         width: 100%;
         height: 100%;
-        layer: modal;  /* Se superpone sobre todo */
+        align: center middle;
+        background: rgba(0, 0, 0, 0.85);
     }
-    #modal-box {
+    .modal-box {
         background: #282828;
         border: heavy #fabd2f;
         padding: 3;
@@ -113,31 +155,32 @@ class LazyModManager(App):
         height: auto;
         align: center middle;
     }
-    #modal-box Label {
-        color: #a89984;
-        margin-bottom: 1;
-        text-align: center;
-        width: 100%;
-    }
-    #modal-box Label.title {
+    .modal-title {
         color: #fabd2f;
         text-style: bold;
+        text-align: center;
         margin-bottom: 2;
     }
-    #modal-box Input {
+    .modal-prompt {
+        color: #a89984;
+        text-align: center;
+        margin-bottom: 1;
+    }
+    .modal-hint {
+        color: #888888;
+        text-style: italic;
+        text-align: center;
+        margin-top: 1;
+    }
+    #modal-input {
         background: #1b1b1b;
         color: #ebdbb2;
         border: solid #fe8019;
         width: 100%;
         margin-bottom: 1;
     }
-    #modal-box Input:focus {
+    #modal-input:focus {
         border: solid #fabd2f;
-    }
-    #modal-box .hint {
-        color: #888888;
-        text-style: italic;
-        margin-top: 1;
     }
     """
 
@@ -146,7 +189,6 @@ class LazyModManager(App):
         # Configuración persistente
         self.config_file = Path.home() / ".config" / "lazy-mod-manager" / "config.json"
         self.config_file.parent.mkdir(parents=True, exist_ok=True)
-        self.load_config()
         
         # Variables de estado
         self.delete_mode = False
@@ -154,6 +196,9 @@ class LazyModManager(App):
         self.instrucciones_label = None
         self._modal_callback = None
         self._is_ready = False
+        
+        # Cargar configuración
+        self.load_config()
 
     def load_config(self):
         """Carga configuración si existe"""
@@ -188,6 +233,7 @@ class LazyModManager(App):
         yield Header(show_clock=True)
         
         # Banner
+        delete_status = "[+] DELETE ON" if self.delete_mode else "[-] DELETE OFF"
         yield Label(
             "█████                                          ██████   ██████              █████\n"
             "░░███                                          ░░██████ ██████              ░░███\n"
@@ -200,7 +246,8 @@ class LazyModManager(App):
             "                                   ███ ░███                                             \n"
             "                                  ░░██████                                               \n"
             "                                    ░░░░░░                                               \n"
-            f"  [>] Source: {DOWNLOADS_DIR}\n",
+            f"  [>] Source: {DOWNLOADS_DIR}  •  {delete_status}\n"
+            f"  Watch out with Caps Lock • Use 'pwd' for paths • Avoid trailing '/'\n",
             id="banner"
         )
         
@@ -231,6 +278,10 @@ class LazyModManager(App):
     def on_mount(self) -> None:
         self._is_ready = True
         self.refresh_list()
+        if self.delete_mode:
+            self.notify("[+] Delete Mode: ENABLED (from last session)", severity="warning")
+        else:
+            self.notify("[*] Delete Mode: DISABLED (from last session)")
 
     def refresh_list(self) -> None:
         """Refresca la lista de archivos"""
@@ -278,9 +329,31 @@ class LazyModManager(App):
             self.notify("[*] Delete Mode: DISABLED")
         
         self._update_instructions()
+        self._update_banner()
+
+    def _update_banner(self):
+        """Actualiza el banner con el estado actual"""
+        delete_status = "[+] DELETE ON" if self.delete_mode else "[-] DELETE OFF"
+        banner = self.query_one("#banner")
+        if banner:
+            banner.update(
+                "█████                                          ██████   ██████              █████\n"
+                "░░███                                          ░░██████ ██████              ░░███\n"
+                "░███         ██████    █████████ █████ ████    ░███░█████░███   ██████   ███████   █████\n" 
+                "░███        ░░░░░███  ░█░░░░███ ░░███ ░███     ░███░░███ ░███  ███░░███ ███░░███  ███░░\n"
+                "░███         ███████  ░   ███░   ░███ ░███     ░███ ░░░  ░███ ░███ ░███░███ ░███ ░░█████\n"
+                "░███      █ ███░░███    ███░   █ ░███ ░███     ░███      ░███ ░███ ░███░███ ░███  ░░░░███\n"
+                "███████████░░████████  █████████ ░░███████     █████     █████░░██████ ░░████████ ██████\n"
+                "░░░░░░░░░░░  ░░░░░░░░  ░░░░░░░░░   ░░░░░███    ░░░░░     ░░░░░  ░░░░░░   ░░░░░░░░ ░░░░░░\n"
+                "                                   ███ ░███                                             \n"
+                "                                  ░░██████                                               \n"
+                "                                    ░░░░░░                                               \n"
+                f"  [>] Source: {DOWNLOADS_DIR}  •  {delete_status}\n"
+                f"  Watch out with Caps Lock • Use 'pwd' for paths • Avoid trailing '/'\n"
+            )
 
     def action_set_source_dir(self) -> None:
-        """Cambia la ruta de origen - Modal overlay"""
+        """Cambia la ruta de origen - Como pantalla separada"""
         def callback(value: str) -> None:
             global DOWNLOADS_DIR
             new_path = Path(value.strip())
@@ -289,23 +362,20 @@ class LazyModManager(App):
                 self.save_config()
                 self.notify(f"[+] Source updated: {DOWNLOADS_DIR}")
                 self.refresh_list()
-                # Actualizar el banner
-                banner = self.query_one("#banner")
-                if banner:
-                    # Reconstruir banner con nueva ruta
-                    pass
+                self._update_banner()
             else:
                 self.notify("[-] Directory does not exist", severity="error")
         
-        self._show_modal(
+        modal = ModalScreen(
             "Change Source Directory",
             "Enter new source directory (Downloads):",
             str(DOWNLOADS_DIR),
             callback
         )
+        self.push_screen(modal)
 
     def action_set_target_dir(self) -> None:
-        """Cambia la ruta de destino - Modal overlay"""
+        """Cambia la ruta de destino - Como pantalla separada"""
         def callback(value: str) -> None:
             global MODS_DIR
             new_path = Path(value.strip())
@@ -313,12 +383,13 @@ class LazyModManager(App):
             self.save_config()
             self.notify(f"[+] Target updated: {MODS_DIR}")
         
-        self._show_modal(
+        modal = ModalScreen(
             "Change Target Directory",
             "Enter new target directory (Mods):",
             str(MODS_DIR),
             callback
         )
+        self.push_screen(modal)
 
     def action_reset_paths(self) -> None:
         global DOWNLOADS_DIR, MODS_DIR
@@ -327,57 +398,11 @@ class LazyModManager(App):
         self.save_config()
         self.notify("[*] Paths reset to defaults")
         self.refresh_list()
+        self._update_banner()
 
     def action_refresh(self) -> None:
         self.refresh_list()
         self.notify("[*] List refreshed")
-
-    def _show_modal(self, title: str, prompt: str, placeholder: str, callback) -> None:
-        """Muestra un modal overlay que cubre toda la pantalla"""
-        self._modal_callback = callback
-        
-        # Crear el overlay con el modal centrado
-        overlay = Vertical(
-            Center(
-                Vertical(
-                    Label(title, classes="title"),
-                    Label(prompt),
-                    Input(placeholder=placeholder, id="modal-input"),
-                    Label("Enter to Accept  •  Escape to Cancel", classes="hint"),
-                    id="modal-box"
-                )
-            ),
-            id="modal-overlay"
-        )
-        self.mount(overlay)
-        
-        # Enfocar el input
-        input_widget = self.query_one("#modal-input", Input)
-        input_widget.focus()
-
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Maneja Enter en el Input (aceptar)"""
-        if event.input.id == "modal-input" and self._modal_callback:
-            value = event.input.value.strip()
-            if value:
-                self._modal_callback(value)
-            # Cerrar el modal
-            overlay = self.query_one("#modal-overlay")
-            overlay.remove()
-            self._modal_callback = None
-
-    def on_key(self, event) -> None:
-        """Maneja teclas globales cuando el modal está activo"""
-        # Si el modal está activo y presionan Escape
-        if event.key == "escape":
-            try:
-                overlay = self.query_one("#modal-overlay")
-                overlay.remove()
-                self._modal_callback = None
-                self.notify("[*] Cancelled")
-                event.prevent_default()
-            except:
-                pass  # No hay modal activo
 
     def process_extraction(self) -> None:
         """Procesa la extracción de los mods seleccionados"""
